@@ -1,43 +1,88 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect } from "react";
 import type { Todo, Filter, Priority } from "@/lib/types";
-import {
-  addTodo,
-  toggleTodo,
-  deleteTodo,
-  clearCompleted,
-  updateTodoPriority,
-} from "@/app/actions";
+
+const STORAGE_KEY = "todos";
 
 const PRIORITY_CONFIG: Record<
   Priority,
-  { label: string; dot: string; badge: string }
+  { label: string; badge: string }
 > = {
   high: {
     label: "높음",
-    dot: "bg-red-500",
     badge: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
   },
   medium: {
     label: "보통",
-    dot: "bg-yellow-400",
-    badge:
-      "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400",
+    badge: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400",
   },
   low: {
     label: "낮음",
-    dot: "bg-green-500",
     badge: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
   },
 };
 
-export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
-  const [todos, setTodos] = useState<Todo[]>(initialTodos);
+function loadTodos(): Todo[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Todo[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTodos(todos: Todo[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
+}
+
+export default function TodoApp() {
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [input, setInput] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [filter, setFilter] = useState<Filter>("all");
-  const [isPending, startTransition] = useTransition();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setTodos(loadTodos());
+    setMounted(true);
+  }, []);
+
+  function update(next: Todo[]) {
+    setTodos(next);
+    saveTodos(next);
+  }
+
+  function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const todo: Todo = {
+      id: Date.now(),
+      text: input.trim(),
+      completed: false,
+      priority,
+      created_at: new Date().toISOString(),
+    };
+    update([todo, ...todos]);
+    setInput("");
+  }
+
+  function handleToggle(id: number) {
+    update(todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+  }
+
+  function handleDelete(id: number) {
+    update(todos.filter((t) => t.id !== id));
+  }
+
+  function handleClearCompleted() {
+    update(todos.filter((t) => !t.completed));
+  }
+
+  function handlePriorityChange(id: number, p: Priority) {
+    update(todos.map((t) => (t.id === id ? { ...t, priority: p } : t)));
+  }
 
   const filtered = todos.filter((t) => {
     if (filter === "active") return !t.completed;
@@ -48,53 +93,11 @@ export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
   const activeCount = todos.filter((t) => !t.completed).length;
   const hasCompleted = todos.some((t) => t.completed);
 
-  function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (!input.trim()) return;
-    const optimistic: Todo = {
-      id: Date.now(),
-      text: input.trim(),
-      completed: false,
-      priority,
-      created_at: new Date().toISOString(),
-    };
-    setTodos((prev) => [optimistic, ...prev]);
-    const text = input.trim();
-    setInput("");
-    startTransition(async () => {
-      await addTodo(text, priority);
-      // Server will revalidate; for now optimistic state is good
-    });
-  }
-
-  function handleToggle(id: number) {
-    setTodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
-    startTransition(() => toggleTodo(id));
-  }
-
-  function handleDelete(id: number) {
-    setTodos((prev) => prev.filter((t) => t.id !== id));
-    startTransition(() => deleteTodo(id));
-  }
-
-  function handleClearCompleted() {
-    setTodos((prev) => prev.filter((t) => !t.completed));
-    startTransition(() => clearCompleted());
-  }
-
-  function handlePriorityChange(id: number, p: Priority) {
-    setTodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, priority: p } : t))
-    );
-    startTransition(() => updateTodoPriority(id, p));
-  }
+  if (!mounted) return null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 flex items-start justify-center pt-16 px-4">
       <div className="w-full max-w-lg">
-        {/* Header */}
         <h1 className="text-4xl font-bold text-white text-center mb-8 tracking-tight">
           할 일 목록
         </h1>
@@ -108,15 +111,9 @@ export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
               className="bg-transparent text-sm text-white/80 py-3 focus:outline-none cursor-pointer"
               aria-label="우선순위 선택"
             >
-              <option value="high" className="bg-slate-800">
-                🔴 높음
-              </option>
-              <option value="medium" className="bg-slate-800">
-                🟡 보통
-              </option>
-              <option value="low" className="bg-slate-800">
-                🟢 낮음
-              </option>
+              <option value="high" className="bg-slate-800">🔴 높음</option>
+              <option value="medium" className="bg-slate-800">🟡 보통</option>
+              <option value="low" className="bg-slate-800">🟢 낮음</option>
             </select>
             <input
               type="text"
@@ -129,7 +126,7 @@ export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
           </div>
           <button
             type="submit"
-            disabled={!input.trim() || isPending}
+            disabled={!input.trim()}
             className="bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold px-5 rounded-xl transition-colors text-sm"
           >
             추가
@@ -153,9 +150,7 @@ export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
               </button>
             ))}
           </div>
-          <span className="text-white/40 text-xs">
-            {activeCount}개 남음
-          </span>
+          <span className="text-white/40 text-xs">{activeCount}개 남음</span>
         </div>
 
         {/* Todo List */}
@@ -181,7 +176,6 @@ export default function TodoApp({ initialTodos }: { initialTodos: Todo[] }) {
           )}
         </div>
 
-        {/* Footer */}
         {hasCompleted && (
           <div className="mt-4 text-center">
             <button
@@ -216,7 +210,6 @@ function TodoItem({
         todo.completed ? "opacity-50" : ""
       }`}
     >
-      {/* Checkbox */}
       <button
         onClick={() => onToggle(todo.id)}
         className={`flex-shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
@@ -227,32 +220,16 @@ function TodoItem({
         aria-label={todo.completed ? "완료 취소" : "완료 표시"}
       >
         {todo.completed && (
-          <svg
-            className="w-3 h-3 text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={3}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M5 13l4 4L19 7"
-            />
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         )}
       </button>
 
-      {/* Text */}
-      <span
-        className={`flex-1 text-sm ${
-          todo.completed ? "line-through text-white/40" : "text-white/90"
-        }`}
-      >
+      <span className={`flex-1 text-sm ${todo.completed ? "line-through text-white/40" : "text-white/90"}`}>
         {todo.text}
       </span>
 
-      {/* Priority badge */}
       <select
         value={todo.priority}
         onChange={(e) => onPriorityChange(todo.id, e.target.value as Priority)}
@@ -266,24 +243,13 @@ function TodoItem({
         ))}
       </select>
 
-      {/* Delete */}
       <button
         onClick={() => onDelete(todo.id)}
         className="opacity-0 group-hover:opacity-100 text-white/30 hover:text-red-400 transition-all"
         aria-label="삭제"
       >
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M6 18L18 6M6 6l12 12"
-          />
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
     </div>
